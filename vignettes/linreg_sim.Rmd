@@ -7,6 +7,8 @@ output: rmarkdown::html_vignette
 library(myFirstProject)
 ```
 
+# Functional Programming
+
 Here, we demonstrate how to pass a function to sample the errors.
 
 ```{r}
@@ -26,4 +28,238 @@ rnorm_5 <- partial(rnorm, sd = 5)
 beta_sim_norm5 <- linreg_sim(1000, 100, alpha_true, beta_true, rnorm_5)
 qqplot(beta_sim_norm, beta_sim_norm5)
 abline(a = 0, b = 1)
+```
+
+
+# Benchmarking and profiling
+
+We want to calculate the cumulative sum of the column `value` and store
+it in the column `sum`.
+
+A first attempt.
+
+```{r}
+library(profvis)
+library(microbenchmark)
+
+cumsum1 <- function(data) {
+  data$sum[1] <- data$value[1]
+  for (i in seq(2, nrow(data))) {
+    data$sum[i] <- data$sum[i-1] + data$value[i]
+  }
+}
+
+profvis({
+  data <- data.frame(value = runif(5e4))
+  cumsum1(data)
+})
+
+```
+
+
+A second attempt. Here, we use a temporary pre-allocated vector to hold
+the cumulative sums.
+
+```{r}
+cumsum2 <- function(data) {
+  csum <- rep(NA, nrow(data))
+  csum[1] <- data$value[1]
+
+  for (i in seq(2, nrow(data))) {
+    csum[i] <- csum[i-1] + data$value[i]
+  }
+  data$sum <- csum
+}
+
+profvis({
+  data <- data.frame(value = runif(5e4))
+  cumsum2(data)
+})
+
+```
+
+
+We can also time each expression using the microbenchmark package.
+
+```{r}
+microbenchmark(
+  expr1 = {
+    data <- data.frame(value = runif(5e4))
+    cumsum1(data)
+  },
+  expr2 = {
+    data <- data.frame(value = runif(5e4))
+    cumsum2(data)
+  },
+  times = 1
+)
+```
+
+
+# T-test example
+
+This example was taken from here: https://adv-r.hadley.nz/perf-improve.html
+
+## The data
+
+We have 1000 experiments that we ran, each with 50 samples. Each sample
+is either in group 1 or group 2. For each of the 1000 experiments, we
+want to do a t-test to see if there is a difference in means between
+group 1 and group 2.
+
+```{r}
+m <- 1000
+n <- 50
+X <- matrix(rnorm(m * n, mean = 10, sd = 3), nrow = m)
+grp <- rep(1:2, each = n / 2)
+```
+
+
+## Formula interface vs. non-formula interface
+
+There are two ways to calculate the t-test: either using the formula
+interface or using two vectors. We see that the formula interface is
+way slower.
+
+```{r}
+system.time(
+  for (i in 1:nrow(X)) {
+    t.test(X[i, ] ~ grp)$statistic
+  }
+)
+system.time(
+  for (i in 1:nrow(X)) {
+    t.test(X[i, grp == 1], X[i, grp == 2])$statistic
+  }
+)
+```
+
+
+## A first solution using for loops
+
+```{r}
+t_test1 <- function(X, grp) {
+  m <- nrow(X)
+  result <- rep(NA, m)
+  for (i in 1:m) {
+    result[i] <- t.test(X[i, grp == 1], X[i, grp == 2])$statistic
+  }
+  return(result)
+}
+
+system.time({t1 <- t_test1(X, grp)})
+```
+
+## Do less work
+
+Take a look at the t-test source code with `stats:::t.test.default`.
+It's doing a lot of additional stuff. Let's write our own function.
+
+```{r}
+my_t <- function(x, grp) {
+  t_stat <- function(x) {
+    m <- mean(x)
+    n <- length(x)
+    var <- sum((x - m) ^ 2) / (n - 1)
+
+    list(m = m, n = n, var = var)
+  }
+
+  g1 <- t_stat(x[grp == 1])
+  g2 <- t_stat(x[grp == 2])
+
+  se_total <- sqrt(g1$var / g1$n + g2$var / g2$n)
+  return((g1$m - g2$m) / se_total)
+}
+
+t_test2 <- function(X, grp) {
+  m <- nrow(X)
+  result <- rep(NA, m)
+  for (i in 1:m) {
+    result[i] <- my_t(X[i, ], grp)
+  }
+  return(result)
+}
+system.time({t2 <- t_test2(X, grp)})
+stopifnot(all.equal(t1, t2))
+```
+
+This is faster, and gives us the same result as before.
+
+## Vectorization
+
+Vectorize the calculation of the t-statistic, so we don't even have to
+use loops.
+
+```{r}
+t_test3 <- function(X, grp){
+  t_stat <- function(X) {
+    m <- rowMeans(X)
+    n <- ncol(X)
+    var <- rowSums((X - m) ^ 2) / (n - 1)
+
+    list(m = m, n = n, var = var)
+  }
+
+  g1 <- t_stat(X[, grp == 1])
+  g2 <- t_stat(X[, grp == 2])
+
+  se_total <- sqrt(g1$var / g1$n + g2$var / g2$n)
+  return((g1$m - g2$m) / se_total)
+}
+
+system.time({t3 <- t_test3(X, grp)})
+stopifnot(all.equal(t1, t3))
+```
+
+
+# Rewriting linear regression simulation
+
+We can use the fact that we can fit one big linear model with multiple
+outcomes. This is equivalent to fitting a linear model for each outcome,
+at least in terms of yielding the same $\beta$ estimates.
+
+We can check this in the unit tests.
+
+```{r}
+microbenchmark(
+  old = linreg_sim(100, 100, 0.2, 0.2),
+  new = linreg_sim_new(100, 100, 0.2, 0.2),
+  times = 10L
+)
+```
+
+
+
+# Parallelism
+
+```{r}
+library(doParallel)
+library(foreach)
+library(parallel)
+
+system.time({
+  cl <- makeCluster(2, outfile = "")
+  registerDoParallel(cl)
+
+  result <- foreach(sim_iter = 1:2, .combine = cbind,
+                    .packages = "myFirstProject") %dopar% {
+    message(sprintf("Running iteration %d", sim_iter))
+    if (sim_iter == 1) {
+      err_func = rnorm
+    }
+    if (sim_iter == 2) {
+      err_func = rcauchy
+    }
+    linreg_sim(10000, 1000, 0.2, 0.2, err_func)
+  }
+
+  stopCluster(cl)
+})
+
+system.time({
+  linreg_sim(10000, 1000, 0.2, 0.2, rnorm)
+  linreg_sim(10000, 1000, 0.2, 0.2, rcauchy)
+
+})
 ```

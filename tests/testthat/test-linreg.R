@@ -12,3 +12,18 @@ test_that("get_lm_components is returning correctly", {
   beta <- get_lm_components(mod)
   expect_identical(names(beta), "x")
 })
+
+test_that("fitting multiple lm's is same as fitting one big lm", {
+  x <- rnorm(100)
+  y1 <- 0.2 + 0.1 * x + rnorm(100)
+  y2 <- 0.2 + 0.1 * x + rnorm(100)
+  mod1 <- lm(y1 ~ x)
+  mod2 <- lm(y2 ~ x)
+  y_big <- cbind(y1, y2)
+  bigmod <- lm(y_big ~ x)
+
+  beta1 <- coef(mod1)[2]
+  beta2 <- coef(mod2)[2]
+  beta_all <- coef(bigmod)[2, ]
+  expect_equal(beta_all, c(beta1, beta2))
+})
