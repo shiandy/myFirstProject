@@ -7,7 +7,23 @@ output: rmarkdown::html_vignette
 library(myFirstProject)
 ```
 
+Here, we demonstrate how to pass a function to sample the errors.
 
 ```{r}
-beta_sim <- linreg_sim_v1(1000, 100, alpha_true, beta_true)
+alpha_true = 0.2
+beta_true = 0.5
+beta_sim_norm <- linreg_sim(1000, 100, alpha_true, beta_true, rnorm)
+beta_sim_cauchy <- linreg_sim(1000, 100, alpha_true, beta_true, rcauchy)
+qqplot(beta_sim_norm, beta_sim_cauchy)
+abline(a = 0, b = 1)
+```
+
+Here, we demonstrate partial application of a function.
+
+```{r}
+library(purrr)
+rnorm_5 <- partial(rnorm, sd = 5)
+beta_sim_norm5 <- linreg_sim(1000, 100, alpha_true, beta_true, rnorm_5)
+qqplot(beta_sim_norm, beta_sim_norm5)
+abline(a = 0, b = 1)
 ```
