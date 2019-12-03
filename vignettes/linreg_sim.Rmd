@@ -1,0 +1,13 @@
+---
+title: "Linear Regression Simulation"
+output: rmarkdown::html_vignette
+---
+
+```{r setup}
+library(myFirstProject)
+```
+
+
+```{r}
+beta_sim <- linreg_sim_v1(1000, 100, alpha_true, beta_true)
+```
