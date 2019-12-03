@@ -1,5 +1,5 @@
 get_lm_components <- function(lm_obj) {
-  return(coef(lm_obj)[1])
+  return(coef(lm_obj)[2])
 }
 
 linreg_sim <- function(nsims, nsamp, alpha_true, beta_true) {
